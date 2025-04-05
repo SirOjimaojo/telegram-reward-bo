@@ -1,4 +1,6 @@
-BOT_TOKEN = "7629469956:AAH4p7fkfbXQH0m7EWVQvgaH7QNRPoC9clM"
+import os
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 MYSQL_HOST = "localhost"
 MYSQL_USER = "root"
 MYSQL_PASSWORD = ""  

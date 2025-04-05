@@ -7,6 +7,9 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from dotenv import load_dotenv
+load_dotenv()
+
 import mysql.connector
 from config import BOT_TOKEN
 
