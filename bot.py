@@ -8,17 +8,19 @@ from telegram.ext import (
     filters,
 )
 from dotenv import load_dotenv
-load_dotenv()
-
+import os
 import mysql.connector
 from config import BOT_TOKEN
 
-# Database Connection
+load_dotenv()
+
+# Database Connection using Railway MySQL environment variables
 db = mysql.connector.connect(
-    host="localhost",
-    user="bot_user",
-    password="my-bot_test",
-    database="telegram_bot",
+    host=os.getenv("MYSQLHOST"),
+    user=os.getenv("MYSQLUSER"),
+    password=os.getenv("MYSQLPASSWORD"),
+    database=os.getenv("MYSQLDATABASE"),
+    port=int(os.getenv("MYSQLPORT"))
 )
 
 # Store user stage and temporary data
