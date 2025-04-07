@@ -14,6 +14,10 @@ from config import BOT_TOKEN
 
 load_dotenv()
 
+# Fetch the environment variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+MYSQLPORT = int(os.getenv("MYSQLPORT", 3306))
+
 # Database Connection using Railway MySQL environment variables
 db = mysql.connector.connect(
     host=os.getenv("MYSQLHOST"),
