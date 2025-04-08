@@ -10,28 +10,26 @@ from telegram.ext import (
 from dotenv import load_dotenv
 import os
 import mysql.connector
-from config import BOT_TOKEN
 
+# Load environment variables
 load_dotenv()
-
-# Fetch the environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MYSQLPORT = int(os.getenv("MYSQLPORT", 3306))
 
-# Database Connection using Railway MySQL environment variables
+# MySQL Connection
 db = mysql.connector.connect(
     host=os.getenv("MYSQLHOST"),
     user=os.getenv("MYSQLUSER"),
     password=os.getenv("MYSQLPASSWORD"),
     database=os.getenv("MYSQLDATABASE"),
-    port=int(os.getenv("MYSQLPORT"))
+    port=MYSQLPORT
 )
 
-# Store user stage and temporary data
+# Session storage
 user_stage = {}
 user_data = {}
 
-# Reusable menu keyboard function
+# Inline Keyboard Menu
 def build_menu_keyboard(referrals, balance):
     keyboard = [
         [InlineKeyboardButton("📢 Watch Ads", callback_data='watch_ads')],
@@ -43,22 +41,19 @@ def build_menu_keyboard(referrals, balance):
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# /start command or menu builder
+# Start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     telegram_id = user.id
     name = user.full_name
-
-    # Get referral code from args
     args = context.args if update.message else []
     referrer_id = None
-    if args:
-        ref_code = args[0]
-        if ref_code.startswith("ref"):
-            try:
-                referrer_id = int(ref_code.replace("ref", ""))
-            except ValueError:
-                pass
+
+    if args and args[0].startswith("ref"):
+        try:
+            referrer_id = int(args[0][3:])
+        except ValueError:
+            referrer_id = None
 
     try:
         with db.cursor(buffered=True) as cursor:
@@ -86,7 +81,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         markup = build_menu_keyboard(referrals, balance)
 
-        # Send response depending on source of update
         if update.message:
             await update.message.reply_text(f"Welcome, {name}! 🎉")
             await update.message.reply_text("Choose an option:", reply_markup=markup)
@@ -96,12 +90,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     except mysql.connector.Error as err:
         print(f"DB Error: {err}")
+        msg = "❌ Database error. Please try again later."
         if update.message:
-            await update.message.reply_text("❌ Database error. Please try again later.")
+            await update.message.reply_text(msg)
         elif update.callback_query:
-            await update.callback_query.message.reply_text("❌ Database error. Please try again later.")
+            await update.callback_query.message.reply_text(msg)
 
-# Button clicks
+# Button Actions
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -109,14 +104,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
 
     if data == "watch_ads":
-        # Create a mock ad session URL
         ad_link = f"https://yourserver.com/ads?user_id={user_id}"
-
         await query.message.reply_text(
             "🎥 Please watch the full ad to earn ₦100.\n\n"
-            "Click the link below to start watching:\n"
-            f"{ad_link}\n\n"
-            "⚠️ Do not minimize or close the video, or you won’t be rewarded."
+            f"Click below:\n{ad_link}\n\n"
+            "⚠️ Do not minimize or close the video."
         )
 
     elif data == "refer":
@@ -127,7 +119,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with db.cursor(buffered=True) as cursor:
             cursor.execute("SELECT account_number, account_name, bank_name, referrals, balance FROM users WHERE telegram_id = %s", (user_id,))
             result = cursor.fetchone()
-
             if result:
                 acc_num, acc_name, bank_name, referrals, balance = result
                 if referrals < 20 or balance < 6000:
@@ -151,9 +142,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
 
     elif data == "no_action":
-        await query.answer("Just showing your balance!", show_alert=False)
+        await query.answer("Just showing your balance!")
 
-# Handle Bank Details Flow
+# Handle Text Inputs
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     stage = user_stage.get(user_id)
@@ -196,7 +187,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await start(update, context)
 
-# Run the bot
+# Run Bot
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
