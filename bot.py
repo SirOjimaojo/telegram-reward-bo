@@ -17,13 +17,18 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 MYSQLPORT = int(os.getenv("MYSQLPORT", 3306))
 
 # MySQL Connection
-db = mysql.connector.connect(
-    host=os.getenv("MYSQLHOST"),
-    user=os.getenv("MYSQLUSER"),
-    password=os.getenv("MYSQLPASSWORD"),
-    database=os.getenv("MYSQLDATABASE"),
-    port=MYSQLPORT
-)
+try:
+    db = mysql.connector.connect(
+        host=os.getenv("MYSQLHOST"),
+        user=os.getenv("MYSQLUSER"),
+        password=os.getenv("MYSQLPASSWORD"),
+        database=os.getenv("MYSQLDATABASE"),
+        port=MYSQLPORT
+    )
+    print("Connected to database successfully.")
+except mysql.connector.Error as err:
+    print(f"Error connecting to database: {err}")
+    exit(1)
 
 # Session storage
 user_stage = {}
