@@ -10,6 +10,7 @@ from telegram.ext import (
 from backend import insert_new_user, get_user_data, update_referrals, handle_withdrawal
 import os
 from dotenv import load_dotenv
+import mysql.connector
 
 # Load environment variables
 load_dotenv()
@@ -17,6 +18,21 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Telegram Bot App
 telegram_app = Application.builder().token(BOT_TOKEN).build()
+
+# Connect to MySQL (for referral check in show_referrals)
+def get_db_connection():
+    try:
+        db = mysql.connector.connect(
+            host=os.getenv("MYSQLHOST"),
+            user=os.getenv("MYSQLUSER"),
+            password=os.getenv("MYSQLPASSWORD"),
+            database=os.getenv("MYSQLDATABASE"),
+            port=int(os.getenv("MYSQLPORT", 3306))
+        )
+        return db
+    except mysql.connector.Error as err:
+        print(f"❌ Database connection error: {err}")
+        return None
 
 # Menu Keyboard Builder
 def build_menu_keyboard(referrals, balance):
@@ -71,7 +87,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "watch_ads":
         ad_link = "https://www.profitableratecpm.com/j4wa6ksu?key=6ad2b237a51106f25754b3e61fbf8cb2"
-        keyboard = InlineKeyboardMarkup([
+        keyboard = InlineKeyboardMarkup([ 
             [InlineKeyboardButton("▶️ Watch Ad", url=ad_link)]
         ])
         await query.message.reply_text(
@@ -92,7 +108,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("❌ You need at least 20 referrals and ₦6,000 balance to withdraw.")
 
     elif data == "show_referrals":
-        with db.cursor(buffered=True) as cursor:
+        db = get_db_connection()
+        if db:
+            cursor = db.cursor(buffered=True)
             cursor.execute("SELECT name FROM users WHERE referred_by = %s", (user_id,))
             referred = cursor.fetchall()
             if referred:
@@ -100,6 +118,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.reply_text(f"👥 Your referrals:\n{names}")
             else:
                 await query.message.reply_text("😕 No referrals yet.")
+            db.close()
 
     elif data == "reload":
         await start(update, context)
@@ -127,12 +146,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         account_name = context.user_data.get("account_name")
         bank_name = update.message.text
 
-        with db.cursor(buffered=True) as cursor:
+        db = get_db_connection()
+        if db:
+            cursor = db.cursor(buffered=True)
             cursor.execute(
                 "UPDATE users SET account_number = %s, account_name = %s, bank_name = %s WHERE telegram_id = %s",
                 (account_number, account_name, bank_name, user_id)
             )
             db.commit()
+            db.close()
 
         user_stage[user_id] = None
         context.user_data.clear()

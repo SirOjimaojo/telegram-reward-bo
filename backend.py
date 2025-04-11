@@ -20,11 +20,22 @@ def get_db_connection():
         print(f"❌ Database connection error: {err}")
         return None
 
-# Insert a new user into the database
+# Insert a new user into the database (check for duplicate telegram_id)
 def insert_new_user(telegram_id, name, referrer_id=None):
     db = get_db_connection()
     if db:
         cursor = db.cursor()
+        
+        # Check if the user already exists
+        cursor.execute("SELECT telegram_id FROM users WHERE telegram_id = %s", (telegram_id,))
+        existing_user = cursor.fetchone()
+        
+        if existing_user:
+            print(f"User with telegram_id {telegram_id} already exists.")
+            db.close()
+            return  # Exit the function without inserting a duplicate
+        
+        # Insert the new user if they do not exist
         cursor.execute(
             "INSERT INTO users (telegram_id, name, balance, referrals, referred_by) VALUES (%s, %s, %s, %s, %s)",
             (telegram_id, name, 0, 0, referrer_id)
