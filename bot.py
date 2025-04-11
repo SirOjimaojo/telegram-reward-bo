@@ -142,10 +142,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🧾 *Next Step: Payment Required*\n\nSend ₦4,000 to:\n*Account Name:* John Doe\n*Account Number:* 1234567890\n*Bank:* First Bank\n\n✅ We’ll process your withdrawal within 6 hours after payment.",
             parse_mode="Markdown"
         )
-        await query.answer()
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 telegram_app.add_handler(MessageHandler(filters.TEXT, handle_text))
-
-telegram_app.run_polling()
