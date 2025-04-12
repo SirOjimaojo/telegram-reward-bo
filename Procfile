@@ -1,1 +1,1 @@
-worker: python bot.py
+web: uvicorn fastapi:app --host 0.0.0.0 --port $PORT
