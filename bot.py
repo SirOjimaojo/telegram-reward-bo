@@ -1,17 +1,23 @@
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
-from backend import insert_new_user, get_user_data, update_referrals, handle_withdrawal
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
+from backend import insert_new_user, get_user_data, update_referrals, handle_withdrawal, get_db_connection
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Telegram Bot App
 telegram_app = Application.builder().token(BOT_TOKEN).build()
 
-# Menu Keyboard Builder
+user_stage = {}
+
 def build_menu_keyboard(referrals, balance):
     keyboard = [
         [InlineKeyboardButton("📢 Watch Ads", callback_data='watch_ads')],
@@ -23,7 +29,6 @@ def build_menu_keyboard(referrals, balance):
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# Start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     telegram_id = user.id
@@ -35,7 +40,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             referrer_id = int(args[0][3:])
         except ValueError:
-            referrer_id = None
+            pass
 
     user_data = get_user_data(telegram_id)
 
@@ -46,6 +51,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 insert_new_user(telegram_id, name, referrer_id)
                 update_referrals(referrer_id)
         insert_new_user(telegram_id, name)
+        user_data = get_user_data(telegram_id)
 
     referrals, balance = user_data
     markup = build_menu_keyboard(referrals, balance)
@@ -55,7 +61,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.callback_query:
         await update.callback_query.message.reply_text(welcome_text, reply_markup=markup)
 
-# Button Click Handler
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -64,9 +69,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "watch_ads":
         ad_link = "https://www.profitableratecpm.com/j4wa6ksu?key=6ad2b237a51106f25754b3e61fbf8cb2"
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("▶️ Watch Ad", url=ad_link)
-        ]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("▶️ Watch Ad", url=ad_link)]
+        ])
         await query.message.reply_text(
             "🎥 Click the button below to watch the full ad and earn ₦100.\n\n⚠️ Do not minimize or exit until it finishes.",
             reply_markup=keyboard
@@ -80,14 +85,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "withdraw":
         if handle_withdrawal(user_id):
-            await query.message.reply_text("✅ Withdrawal request accepted. We'll process your payment soon.")
+            user_stage[user_id] = "account_number"
+            await query.message.reply_text("💳 Enter your account number:")
         else:
             await query.message.reply_text("❌ You need at least 20 referrals and ₦6,000 balance to withdraw.")
 
     elif data == "show_referrals":
-        with db.cursor(buffered=True) as cursor:
+        db = get_db_connection()
+        if db:
+            cursor = db.cursor()
             cursor.execute("SELECT name FROM users WHERE referred_by = %s", (user_id,))
             referred = cursor.fetchall()
+            db.close()
             if referred:
                 names = "\n".join(f"• {r[0]}" for r in referred)
                 await query.message.reply_text(f"👥 Your referrals:\n{names}")
@@ -100,7 +109,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "no_action":
         await query.answer("✅ Balance displayed.")
 
-# Handle Text Replies (Withdraw Flow)
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     stage = user_stage.get(user_id)
@@ -120,12 +128,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         account_name = context.user_data.get("account_name")
         bank_name = update.message.text
 
-        with db.cursor(buffered=True) as cursor:
+        db = get_db_connection()
+        if db:
+            cursor = db.cursor()
             cursor.execute(
                 "UPDATE users SET account_number = %s, account_name = %s, bank_name = %s WHERE telegram_id = %s",
                 (account_number, account_name, bank_name, user_id)
             )
             db.commit()
+            db.close()
 
         user_stage[user_id] = None
         context.user_data.clear()
@@ -136,21 +147,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-# Webhook Setup: Add your webhook here.
-async def webhook_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Handle incoming webhook updates here
-    pass
-
+# Register handlers
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CallbackQueryHandler(button_handler))
 telegram_app.add_handler(MessageHandler(filters.TEXT, handle_text))
-
-# Replace with your server's URL to handle webhooks:
-WEBHOOK_URL = 'https://www.profitableratecpm.com/j4wa6ksu?key=6ad2b237a51106f25754b3e61fbf8cb2'
-
-# Webhook setup (ensure to use this only in a webhook context)
-telegram_app.bot.set_webhook(WEBHOOK_URL)
-
-if __name__ == '__main__':
-    # Add code for webhook server or worker
-    pass
